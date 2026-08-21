@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="referrer" content="no-referrer" />
+  <title>直播</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xgplayer@latest/dist/index.min.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+    #xgplayer { width: 100vw; height: 100vh; }
+    /* iOS 播放按钮页 */
+    .ios-page {
+      display: none;
+      width: 100%; height: 100%;
+      background: #000; color: #fff;
+      flex-direction: column; align-items: center; justify-content: center;
+      font-family: -apple-system, sans-serif; text-align: center; padding: 20px;
+    }
+    .ios-page.show { display: flex; }
+    .ios-page .play-icon {
+      width: 90px; height: 90px;
+      border-radius: 50%; background: #007aff;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 24px; cursor: pointer;
+      box-shadow: 0 4px 24px rgba(0,122,255,0.4);
+    }
+    .ios-page .play-icon::after {
+      content: ''; width: 0; height: 0;
+      border-left: 30px solid #fff;
+      border-top: 20px solid transparent;
+      border-bottom: 20px solid transparent;
+      margin-left: 8px;
+    }
+    .ios-page p { font-size: 17px; color: #ccc; }
+    .ios-page .sub { font-size: 13px; color: #666; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div id="xgplayer"></div>
+
+  <!-- iOS：只显示播放按钮，点击才跳转，绝不自动跳转 -->
+  <div class="ios-page" id="iosPage">
+    <div class="play-icon" onclick="openStream()"></div>
+    <p>点击播放直播</p>
+    <p class="sub">点击后将调起系统播放器</p>
+  </div>
+
+  <script>
+    /* ===== 流地址配置 —— 替换成你自己的直播地址 ===== */
+    var STREAMS = {
+      flv: 'http://vrllive.gkk.cn/live/18tv8ik9ol0p1qaz2wsx3edc4rfv5tgb6yhn7ujm8ik9ol0p1qaz2wsx3edc4rfv5tgb6.flv',
+      hls: 'http://vrllive.gkk.cn/live/18tv8ik9ol0p1qaz2wsx3edc4rfv5tgb6yhn7ujm8ik9ol0p1qaz2wsx3edc4rfv5tgb6.m3u8'
+    };
+
+    /* ===== 环境检测 ===== */
+    var UA = navigator.userAgent.toLowerCase();
+    var isIOS = /iphone|ipad|ipod/.test(UA)
+      || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var isAndroid = /android/.test(UA);
+    var videoEl = document.createElement('video');
+    var nativeHlsSupported = videoEl.canPlayType('application/vnd.apple.mpegurl') !== '';
+    var mseSupported = !!(window.MediaSource || window.WebKitMediaSource);
+
+    /* ===== iOS：点击跳转播放 HLS ===== */
+    function openStream() {
+      window.location.href = STREAMS.hls;
+    }
+
+    if (isIOS) {
+      // iOS：隐藏播放器，显示播放按钮，等用户主动点击
+      document.getElementById('xgplayer').style.display = 'none';
+      document.getElementById('iosPage').classList.add('show');
+    } else {
+      // 安卓 / PC：正常嵌入播放
+      (function() {
+        var CDN_BUILDERS = [
+          function(pkg, path) { return 'https://cdn.jsdelivr.net/npm/' + pkg + '@latest/' + path; },
+          function(pkg, path) { return 'https://unpkg.com/' + pkg + '@latest/' + path; },
+          function(pkg, path) { return 'https://unpkg.byted-static.com/' + pkg + '/@latest/' + path; }
+        ];
+
+        function loadScript(pkg, path, callback) {
+          var index = 0;
+          function tryNext() {
+            if (index >= CDN_BUILDERS.length) { callback(new Error('CDN 全部失败: ' + pkg)); return; }
+            var url = CDN_BUILDERS[index](pkg, path);
+            index++;
+            var s = document.createElement('script');
+            s.src = url;
+            s.onload = function() { console.log('[OK]', pkg, '←', url); callback(null); };
+            s.onerror = function() { console.warn('[FAIL]', pkg, '←', url); tryNext(); };
+            document.head.appendChild(s);
+          }
+          tryNext();
+        }
+
+        function loadAll(callback) {
+          loadScript('xgplayer', 'dist/index.min.js', function(err) {
+            if (err) { callback(err); return; }
+            loadScript('xgplayer-flv', 'dist/index.min.js', function() {
+              loadScript('xgplayer-hls', 'dist/index.min.js', function() { callback(null); });
+            });
+          });
+        }
+
+        function decideProtocol() {
+          if (isAndroid) return mseSupported ? 'flv' : 'hls';
+          return mseSupported ? 'flv' : 'hls';
+        }
+
+        var player = null;
+        function buildPlayer(protocol) {
+          var PlayerCtor = window.Player;
+          var FlvPlugin = window.FlvPlayer;
+          var HlsPlugin = window.HlsPlayer;
+          if (!PlayerCtor) { console.error('Player 未加载'); return; }
+          if (player) { try { player.destroy(); } catch (e) {} player = null; }
+
+          var url = STREAMS[protocol];
+          var config = {
+            id: 'xgplayer',
+            url: url,
+            isLive: true,
+            autoplay: false,
+            playsinline: true,
+            width: '100%',
+            height: '100%',
+            controls: true,
+            controlBar: { autoHide: true, autoHideTime: 3000 },
+            retryCount: 3,
+            retryDelay: 1000
+          };
+
+          if (protocol === 'flv') {
+            if (!mseSupported || !FlvPlugin) { return buildPlayer('hls'); }
+            config.plugins = [FlvPlugin];
+            config.flv = {
+              retryCount: 3, retryDelay: 1000, loadTimeout: 15000,
+              maxReaderInterval: 10000, targetLatency: 5, maxLatency: 10, bufferBehind: 10
+            };
+          } else {
+            if (!nativeHlsSupported && HlsPlugin) {
+              config.plugins = [HlsPlugin];
+              config.hls = { liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 10, lowLatencyMode: true };
+            }
+          }
+
+          try { player = new PlayerCtor(config); }
+          catch (e) { console.error('播放器创建失败:', e); }
+        }
+
+        loadAll(function(err) {
+          if (err) { console.error('脚本加载失败:', err); return; }
+          buildPlayer(decideProtocol());
+        });
+      })();
+    }
+  </script>
+</body>
+</html>
